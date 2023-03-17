@@ -1,6 +1,7 @@
 import sys
 import json
 import socket
+import threading
 
 
 class Client:
@@ -18,7 +19,8 @@ class Client:
     def start(self):
         print("c start")
         if (self.user_login()):
-            self.listen()
+            threading.Thread(target=self.listen).start()
+            threading.Thread(target=self.send).start()
 
     def user_login(self):
         print("c user_login")
@@ -37,7 +39,7 @@ class Client:
             msg = msg.encode('utf-8')
             # for connected UDP sockets, use the SEND command.
             self.socket.send(msg)
-
+    # server user login
             resp, addr = self.socket.recvfrom(1024)
 
             resp = resp.decode('utf-8')
@@ -45,11 +47,13 @@ class Client:
             if addr == (self.ip, self.port):
                 if resp == "[SUCCESS]":
                     return True
-                elif resp == "[!USRUNAVL]":
-                    print("Username sudah digunakan")
+                elif resp == "[!username is not available]":
+                    print("Username default")
                     continue
+
+
             else:
-                print("Login gagal silahkan coba lagi")
+                print("Login another name")
                 continue
 
     def send_usernameRoom(self, username, room):
@@ -94,17 +98,19 @@ class Client:
         sys.exit()
 
     def listen(self):
-        print("c listen, ")
+        print("c listens, ")
 
         msgformat = {"method": "SEND",
                      "token": self.__token,
                      "username": self.__username
                      }
 
-        #self.socket.settimeout(1)
+        self.socket.settimeout(1)
 
         while self.running:
             try:
+
+                #
                 msg = input(f"{self.__username} > ")
                 if msg != "":
                     sendmsg = msgformat
@@ -112,14 +118,54 @@ class Client:
                     sendmsg = json.dumps(sendmsg).encode('utf-8')
                     self.socket.send(sendmsg)
 
-                data = self.socket.recv(1024)
-                data = data.decode('utf-8')
-                print(data)
+                # data = self.socket.recv(1024)
+                # data = data.decode('utf-8')
+                # print(data)
 
             except KeyboardInterrupt:
                 self.user_logout()
             except:
                 pass
+
+    def send(self):
+        msgformat = {"method": "RECEIVE",
+                     "token": self.__token,
+                     "username": ""
+                     }
+        while self.running:
+            try:
+                data, addr = self.socket.recvfrom(1024)
+                data = json.loads(data.decode('utf-8'))
+
+                print("c received data", data )
+                room_to_join = data["room"]
+                user_to_join = data["username"]
+                print("method", data["method"])
+                sendmsg = msgformat
+                sendmsg["username"] = user_to_join
+                sendmsg["room"] = room_to_join
+                # self.socket.send(sendmsg)
+                if data["method"] == "room_request":
+                    print("inside if")
+                    answ = input("allow user to join room (yes/no):")
+                    print("answer=", answ)
+                    if answ == "yes":
+                        sendmsg["msg"] = "yes"
+                        print(sendmsg)
+                        sendmsg = json.dumps(sendmsg).encode('utf-8')
+
+                        self.socket.send(sendmsg)
+                    else:
+                        sendmsg["msg"] = "no"
+                        sendmsg = json.dumps(sendmsg).encode('utf-8')
+                        self.socket.send(sendmsg)
+            except KeyboardInterrupt:
+                self.stop()
+            except socket.timeout:
+                continue
+
+            except Exception as e:
+                a = (str(e))
 
 
 def check_connection(addr, port):
@@ -130,15 +176,15 @@ def check_connection(addr, port):
     socket_test = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     socket_test.sendto(msg.encode('utf-8'), (addr, port))
-    #oldTimeout = socket_test.gettimeout()
-    #socket_test.settimeout(10)
+    oldTimeout = socket_test.gettimeout()
+    socket_test.settimeout(10)
     try:
         token, address = socket_test.recvfrom(1024)
     except:
         print("Port Closed")
         return False
 
-    #socket_test.settimeout(oldTimeout)
+    socket_test.settimeout(oldTimeout)
 
     if (addr, port) == address:
         return token.decode('utf-8')

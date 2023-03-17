@@ -21,10 +21,11 @@ PORT = 5000
 
 
 class Rooms:
-    def __init__(self, roomName, socket):
+    def __init__(self, roomName, socket, addr):
         self.__roomName = roomName
         self.__userList = []
         self.socket = socket
+        self.creator_addr = addr
 
         log(f"Created room # {self.__roomName}")
 
@@ -38,7 +39,7 @@ class Rooms:
         print("r adduser, addr = ", addr, username)
         welcomemsg = "Welcome {}"
         self.__userList.append(addr)
-        self.broadcast(welcomemsg.format(username), addr)
+        self.broadcast(welcomemsg.format(username), addr, username)
 
     def delUser(self, addr, username):
         self.__userList.remove(addr)
@@ -52,7 +53,7 @@ class Rooms:
         else:
             log(msg)
 
-        msg = msg.encode('utf-8')
+        msg = (msg.encode('utf-8'))
 
         for user_addr in self.__userList:
             if addr != user_addr:
@@ -115,11 +116,29 @@ class UDPServer:
         if username not in self.__userList.keys():
             if room not in self.__roomList:
                 self.__roomList[room] = Rooms(
-                    room, self.socket)
+                    room, self.socket, addr)
             else:
-                self.socket.sendto()
+                creator_addr = self.__roomList[room].creator_addr
+                request = {
+                    "method": "room_request",
+                    "username": username,
+                    "room": room
+                }
+                req_mes = json.dumps(request).encode('utf-8')
+                self.socket.sendto(req_mes, creator_addr)
+                print("s server sent messages")
+                return
+                # oldTimeout = socket.socket().gettimeout()
+                # socket.socket().settimeout(100000)
+                # data, addr = self.socket.recvfrom(1024)
+                #
+                # socket.socket().settimeout(oldTimeout)
 
-
+                answ = data.decode('utf-8')
+                print("s data appr = ", answ)
+                if answ == "not approved":
+                    print("user is not approved")
+                    return
             user_attributes = [addr, room, token]
             self.__userList[username] = user_attributes
             self.__roomList[room].addUser(addr, username)
@@ -130,6 +149,32 @@ class UDPServer:
 
         self.socket.sendto("[!username is not available]".encode('utf-8'), addr)
 
+    def receive_msg_approval(self, addr, data):
+        print("s msg approval, addr = ", addr, "data:", data)
+
+        username = data['username']
+        room = data['room']
+        token = data['token']
+        msg = data["msg"]
+        # write here ...........
+        if username not in self.__userList.keys():
+            if room not in self.__roomList:
+                self.__roomList[room] = Rooms(
+                    room, self.socket, addr)
+
+                print("s data appr = ", msg)
+                if msg != "yes":
+                    print("user is not approved")
+                    return
+            user_attributes = [addr, room, token]
+            self.__userList[username] = user_attributes
+            self.__roomList[room].addUser(addr, username)
+            log(
+                f"{addr[0]}:{addr[1]} with username {username} joined to {room}")
+            self.socket.sendto("[SUCCESS]".encode('utf-8'), addr)
+            return
+
+        self.socket.sendto("[!username is not available]".encode('utf-8'), addr)
     def user_logout(self, addr, data):
         token = data['token']
         username = data['username']
@@ -144,7 +189,7 @@ class UDPServer:
                 del self.__roomList[user_room]
 
     def send_msg(self, addr, data):
-        print("s broadcast, addr = ", addr, "data:", data)
+        print("s send msg, addr = ", addr, "data:", data)
 
         msg = data["msg"]
         token = data['token']
@@ -182,6 +227,9 @@ class UDPServer:
 
                 elif method == "SEND":
                     threading.Thread(target=self.send_msg,
+                                     args=(addr, data)).start()
+                elif method == "RECEIVE":
+                    threading.Thread(target=self.receive_msg_approval,
                                      args=(addr, data)).start()
 
             except KeyboardInterrupt:
